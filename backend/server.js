@@ -52,12 +52,26 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
-// Routes (WITHOUT auth middleware for now - we'll add later)
+// Auth middleware
+const authMiddleware = require("./src/middleware/authMiddleware");
+
+// Routes
 app.use("/api/auth", require("./src/routes/authRoutes"));
-app.use("/api/products", require("./src/routes/productRoutes"));
-app.use("/api/sales", require("./src/routes/saleRoutes"));
-app.use("/api/customers", require("./src/routes/customerRoutes"));
-app.use("/api/reports", require("./src/routes/reportRoutes"));
+app.use(
+  "/api/dashboard",
+  authMiddleware,
+  require("./src/routes/dashboardRoutes")
+);
+
+// Apply auth middleware to all protected routes
+app.use("/api/products", authMiddleware, require("./src/routes/productRoutes"));
+app.use("/api/sales", authMiddleware, require("./src/routes/saleRoutes"));
+app.use(
+  "/api/customers",
+  authMiddleware,
+  require("./src/routes/customerRoutes")
+);
+app.use("/api/reports", authMiddleware, require("./src/routes/reportRoutes"));
 
 // 404 handler
 app.use((req, res) => {

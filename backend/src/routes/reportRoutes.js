@@ -47,29 +47,30 @@ router.get("/dashboard", async (req, res) => {
 // Sales report
 router.get("/sales", async (req, res) => {
   try {
-    const { start_date, end_date } = req.query;
-
+    const { year } = req.query; // optional filter by year
     let query = `
-            SELECT DATE(s.sale_date) as date, 
-                   COUNT(*) as total_sales,
-                   SUM(s.total_amount) as total_revenue,
-                   SUM(s.paid_amount) as total_paid,
-                   SUM(s.remaining_amount) as total_outstanding
-            FROM sales s
-        `;
-
+      SELECT 
+        DATE_FORMAT(s.sale_date, '%Y-%m') AS month,
+        COUNT(*) AS total_sales,
+        SUM(s.total_amount) AS total_revenue,
+        SUM(s.paid_amount) AS total_paid,
+        SUM(s.remaining_amount) AS total_outstanding
+      FROM sales s
+    `;
     const params = [];
 
-    if (start_date && end_date) {
-      query += " WHERE DATE(s.sale_date) BETWEEN ? AND ?";
-      params.push(start_date, end_date);
+    if (year) {
+      query += " WHERE YEAR(s.sale_date) = ?";
+      params.push(year);
     }
 
-    query += " GROUP BY DATE(s.sale_date) ORDER BY date DESC";
+    query += " GROUP BY month ORDER BY month ASC";
 
     const [report] = await db.query(query, params);
+
     res.json(report);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: error.message });
   }
 });

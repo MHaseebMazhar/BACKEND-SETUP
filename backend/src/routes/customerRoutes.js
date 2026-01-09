@@ -2,17 +2,23 @@ const express = require("express");
 const router = express.Router();
 const db = require("../config/database");
 
-// Get all customers
+// GET all customers
 router.get("/", async (req, res) => {
   try {
-    const [customers] = await db.query("SELECT * FROM customers ORDER BY name");
-    res.json(customers);
+    const [customers] = await db.query(
+      "SELECT id, name, phone, email, address FROM customers ORDER BY name"
+    );
+
+    res.json({
+      success: true,
+      data: customers,
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// Create customer
+// CREATE customer
 router.post("/", async (req, res) => {
   try {
     const { name, phone, email, address } = req.body;
@@ -23,11 +29,38 @@ router.post("/", async (req, res) => {
     );
 
     res.status(201).json({
+      success: true,
+      message: "Customer created",
       id: result.insertId,
-      message: "Customer created successfully",
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// UPDATE customer
+router.put("/:id", async (req, res) => {
+  try {
+    const { name, phone, email, address } = req.body;
+
+    await db.query(
+      "UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?",
+      [name, phone, email, address, req.params.id]
+    );
+
+    res.json({ success: true, message: "Customer updated" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE customer
+router.delete("/:id", async (req, res) => {
+  try {
+    await db.query("DELETE FROM customers WHERE id=?", [req.params.id]);
+    res.json({ success: true, message: "Customer deleted" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

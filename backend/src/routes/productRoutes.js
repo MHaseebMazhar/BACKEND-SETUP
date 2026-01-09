@@ -1,61 +1,140 @@
 const express = require("express");
 const router = express.Router();
+const db = require("../config/database");
 
-// Temporary in-memory products for testing
-let products = [
-  {
-    id: 1,
-    name: "Laptop Dell XPS",
-    price: 1200,
-    quantity: 10,
-    category: "Electronics",
-    product_code: "PROD-001",
-  },
-  {
-    id: 2,
-    name: "Wireless Mouse",
-    price: 25,
-    quantity: 50,
-    category: "Accessories",
-    product_code: "PROD-002",
-  },
-  {
-    id: 3,
-    name: "Keyboard Mechanical",
-    price: 45,
-    quantity: 30,
-    category: "Accessories",
-    product_code: "PROD-003",
-  },
-];
+// GET all products
+router.get("/", async (req, res) => {
+  try {
+    const [products] = await db.query(`
+      SELECT 
+        id,
+        product_code,
+        name,
+        category,
+        purchase_price,
+        sale_price,
+        quantity,
+        min_stock_level,
+        description,
+        CASE
+          WHEN quantity = 0 THEN 'Out of Stock'
+          WHEN quantity <= min_stock_level THEN 'Low Stock'
+          ELSE 'In Stock'
+        END AS stock_status
+      FROM products
+      ORDER BY name
+    `);
 
-// Route handler functions
-const getAllProducts = (req, res) => {
-  res.json(products);
-};
-
-const createProduct = (req, res) => {
-  const newProduct = {
-    id: products.length + 1,
-    product_code: `PROD-${Date.now()}`,
-    ...req.body,
-  };
-  products.push(newProduct);
-  res.status(201).json(newProduct);
-};
-
-const getProductById = (req, res) => {
-  const product = products.find((p) => p.id == req.params.id);
-  if (product) {
-    res.json(product);
-  } else {
-    res.status(404).json({ error: "Product not found" });
+    res.json({ success: true, data: { products } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
   }
-};
+});
 
-// Define routes
-router.get("/", getAllProducts);
-router.post("/", createProduct);
-router.get("/:id", getProductById);
+// GET single product by ID
+router.get("/:id", async (req, res) => {
+  try {
+    const [products] = await db.query("SELECT * FROM products WHERE id = ?", [
+      req.params.id,
+    ]);
+
+    if (products.length === 0)
+      return res.status(404).json({ message: "Product not found" });
+
+    res.json({ success: true, data: { product: products[0] } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CREATE product
+router.post("/", async (req, res) => {
+  try {
+    const {
+      product_code,
+      name,
+      category,
+      purchase_price,
+      sale_price,
+      quantity,
+      min_stock_level,
+      description,
+    } = req.body;
+
+    const [result] = await db.query(
+      `INSERT INTO products 
+      (product_code, name, category, purchase_price, sale_price, quantity, min_stock_level, description)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        product_code || `PROD-${Date.now()}`,
+        name,
+        category,
+        purchase_price,
+        sale_price,
+        quantity,
+        min_stock_level || 10,
+        description || "",
+      ]
+    );
+
+    res.status(201).json({ success: true, data: { id: result.insertId } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UPDATE product
+router.put("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      product_code,
+      name,
+      category,
+      purchase_price,
+      sale_price,
+      quantity,
+      min_stock_level,
+      description,
+    } = req.body;
+
+    await db.query(
+      `UPDATE products 
+       SET product_code=?, name=?, category=?, purchase_price=?, sale_price=?, quantity=?, min_stock_level=?, description=? 
+       WHERE id=?`,
+      [
+        product_code,
+        name,
+        category,
+        purchase_price,
+        sale_price,
+        quantity,
+        min_stock_level,
+        description,
+        id,
+      ]
+    );
+
+    res.json({ success: true, message: "Product updated successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE product
+router.delete("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.query("DELETE FROM products WHERE id=?", [id]);
+    res.json({ success: true, message: "Product deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;

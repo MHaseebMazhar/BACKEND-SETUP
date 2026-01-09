@@ -5,38 +5,34 @@ const db = require("../config/database");
 
 const router = express.Router();
 
-// Signup route
+// Signup
 router.post("/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
     // Validation
-    if (!name || !email || !password) {
+    if (!name || !email || !password)
       return res
         .status(400)
         .json({ error: "Name, email, and password are required" });
-    }
 
-    if (password.length < 6) {
+    if (password.length < 6)
       return res
         .status(400)
         .json({ error: "Password must be at least 6 characters" });
-    }
 
-    // Check if email already exists
+    // Check existing email
     const [existingUser] = await db.query(
       "SELECT id FROM users WHERE email = ?",
       [email]
     );
-
-    if (existingUser.length > 0) {
+    if (existingUser.length > 0)
       return res.status(400).json({ error: "Email already registered" });
-    }
 
     // Hash password
     const hashedPassword = await bcryptjs.hash(password, 10);
 
-    // Insert user into database
+    // Insert user
     const [result] = await db.query(
       "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
       [name, email, hashedPassword, "user"]
@@ -57,38 +53,32 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-// Login route
+// Login
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validation
-    if (!email || !password) {
+    if (!email || !password)
       return res.status(400).json({ error: "Email and password are required" });
-    }
 
-    // Find user by email
+    // Find user
     const [users] = await db.query("SELECT * FROM users WHERE email = ?", [
       email,
     ]);
-
-    if (users.length === 0) {
+    if (users.length === 0)
       return res.status(401).json({ error: "Invalid email or password" });
-    }
 
     const user = users[0];
 
     // Compare password
     const isPasswordValid = await bcryptjs.compare(password, user.password);
-
-    if (!isPasswordValid) {
+    if (!isPasswordValid)
       return res.status(401).json({ error: "Invalid email or password" });
-    }
 
-    // Generate JWT token
+    // JWT token
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || "your_secret_key",
+      process.env.JWT_SECRET || "change_this_secret_key_in_env",
       { expiresIn: "24h" }
     );
 

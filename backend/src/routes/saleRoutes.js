@@ -2,166 +2,150 @@ const express = require("express");
 const router = express.Router();
 const db = require("../config/database");
 
-// Get all sales
+// GET all sales
 router.get("/", async (req, res) => {
   try {
     const [sales] = await db.query(`
-            SELECT s.*, c.name as customer_name 
-            FROM sales s 
-            LEFT JOIN customers c ON s.customer_id = c.id 
-            ORDER BY sale_date DESC
-        `);
-    res.json(sales);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+      SELECT s.id, s.invoice_number, s.sale_date,
+             s.total_amount, s.paid_amount, s.remaining_amount,
+             c.name AS customer_name
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      ORDER BY s.sale_date DESC
+    `);
+
+    res.json({ success: true, data: { sales } });
+  } catch (err) {
+    console.error("SALES FETCH ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Create sale
+// CREATE new sale
 router.post("/", async (req, res) => {
   const connection = await db.getConnection();
-
   try {
+    const {
+      customer_id,
+      items,
+      paid_amount = 0,
+      payment_method = "cash",
+    } = req.body;
+
+    if (!items || items.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "At least 1 item is required" });
+    }
+
+    // Begin transaction
     await connection.beginTransaction();
 
-    const { customer_id, items, discount, paid_amount, payment_method, notes } =
-      req.body;
-
     // Calculate total
-    let total_amount = 0;
-    items.forEach((item) => {
-      total_amount +=
-        item.quantity * item.unit_price - (item.discount_amount || 0);
-    });
+    let total = 0;
+    for (const item of items) {
+      if (!item.product_id || !item.quantity || !item.unit_price) {
+        throw new Error(
+          "Invalid item: product_id, quantity, and unit_price required"
+        );
+      }
+      total += item.quantity * item.unit_price;
+    }
 
-    // Apply discount
-    total_amount -= discount || 0;
-    const remaining_amount = total_amount - paid_amount;
+    const remaining = Math.max(total - paid_amount, 0);
+    const invoice = `INV-${Date.now()}`;
 
-    // Generate invoice number
-    const invoiceNumber = `INV-${Date.now()}-${Math.floor(
-      Math.random() * 1000
-    )}`;
+    // Insert sale
+    const discount = 0;
 
-    // Create sale record
-    const [saleResult] = await connection.query(
-      `INSERT INTO sales 
-             (invoice_number, customer_id, total_amount, discount, paid_amount, remaining_amount, payment_method, notes) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    const [sale] = await connection.query(
+      `INSERT INTO sales
+   (invoice_number, customer_id, total_amount, discount, paid_amount, remaining_amount, payment_method, sale_date, notes)
+   VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
       [
-        invoiceNumber,
-        customer_id,
-        total_amount,
-        discount || 0,
+        invoice,
+        customer_id || null,
+        total,
+        discount,
         paid_amount,
-        remaining_amount,
+        remaining,
         payment_method,
-        notes,
+        null,
       ]
     );
 
-    const saleId = saleResult.insertId;
-
-    // Create sale items and update stock
+    // Insert sale items and update stock
     for (const item of items) {
-      // Insert sale item
-      await connection.query(
-        `INSERT INTO sale_items 
-                 (sale_id, product_id, quantity, unit_price, discount_percent, discount_amount, line_total) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          saleId,
-          item.product_id,
-          item.quantity,
-          item.unit_price,
-          item.discount_percent || 0,
-          item.discount_amount || 0,
-          item.quantity * item.unit_price - (item.discount_amount || 0),
-        ]
-      );
-
-      // Update product stock
-      await connection.query(
-        "UPDATE products SET quantity = quantity - ? WHERE id = ?",
-        [item.quantity, item.product_id]
-      );
-
-      // Record stock transaction
-      const [product] = await connection.query(
+      // Get current stock
+      const [productRows] = await connection.query(
         "SELECT quantity FROM products WHERE id = ?",
         [item.product_id]
       );
 
-      const newQuantity = product[0].quantity - item.quantity;
+      if (!productRows.length) {
+        throw new Error(`Product ID ${item.product_id} not found`);
+      }
 
+      const previousQty = productRows[0].quantity;
+      const newQty = previousQty - item.quantity;
+
+      if (newQty < 0) {
+        throw new Error(`Insufficient stock for product ID ${item.product_id}`);
+      }
+
+      // Insert sale item
       await connection.query(
-        `INSERT INTO stock_transactions 
-                 (product_id, transaction_type, quantity_change, previous_quantity, new_quantity, reference_id, notes) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sale_items
+          (sale_id, product_id, quantity, unit_price, line_total)
+          VALUES (?, ?, ?, ?, ?)`,
         [
+          sale.insertId,
           item.product_id,
-          "sale",
-          -item.quantity,
-          product[0].quantity,
-          newQuantity,
-          saleId,
-          `Sale #${invoiceNumber}`,
+          item.quantity,
+          item.unit_price,
+          item.quantity * item.unit_price,
         ]
       );
-    }
 
-    // Update customer balance if credit sale
-    if (remaining_amount > 0 && customer_id) {
+      // Update product stock
+      await connection.query("UPDATE products SET quantity = ? WHERE id = ?", [
+        newQty,
+        item.product_id,
+      ]);
+
+      // Log stock transaction
       await connection.query(
-        "UPDATE customers SET outstanding_balance = outstanding_balance + ? WHERE id = ?",
-        [remaining_amount, customer_id]
+        `INSERT INTO stock_transactions
+          (product_id, transaction_type, quantity_change, previous_quantity, new_quantity, notes)
+          VALUES (?, 'sale', ?, ?, ?, ?)`,
+        [
+          item.product_id,
+          -item.quantity,
+          previousQty,
+          newQty,
+          `Sale ${sale.insertId}`,
+        ]
       );
     }
 
     await connection.commit();
 
-    res.status(201).json({
-      sale_id: saleId,
-      invoice_number: invoiceNumber,
-      message: "Sale completed successfully",
+    res.json({
+      success: true,
+      sale: {
+        id: sale.insertId,
+        invoice_number: invoice,
+        total_amount: total,
+        paid_amount,
+        remaining_amount: remaining,
+      },
     });
-  } catch (error) {
+  } catch (err) {
     await connection.rollback();
-    res.status(500).json({ error: error.message });
+    console.error("SALE CREATE ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
   } finally {
     connection.release();
-  }
-});
-
-// Get sale by ID
-router.get("/:id", async (req, res) => {
-  try {
-    const [sales] = await db.query(
-      `SELECT s.*, c.name as customer_name, c.phone, c.email 
-             FROM sales s 
-             LEFT JOIN customers c ON s.customer_id = c.id 
-             WHERE s.id = ?`,
-      [req.params.id]
-    );
-
-    if (sales.length === 0) {
-      return res.status(404).json({ error: "Sale not found" });
-    }
-
-    const [items] = await db.query(
-      `SELECT si.*, p.name as product_name, p.product_code 
-             FROM sale_items si 
-             JOIN products p ON si.product_id = p.id 
-             WHERE si.sale_id = ?`,
-      [req.params.id]
-    );
-
-    res.json({
-      ...sales[0],
-      items,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 });
 
