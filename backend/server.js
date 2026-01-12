@@ -72,6 +72,8 @@ app.use(
   require("./src/routes/customerRoutes")
 );
 app.use("/api/reports", authMiddleware, require("./src/routes/reportRoutes"));
+app.use("/api/barcode", authMiddleware, require("./src/routes/barcodeRoutes"));
+app.use("/api/payments", authMiddleware, require("./src/routes/paymentRoutes"));
 
 // 404 handler
 app.use((req, res) => {

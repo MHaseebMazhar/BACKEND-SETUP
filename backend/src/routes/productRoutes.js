@@ -32,6 +32,29 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET all categories
+router.get("/categories", async (req, res) => {
+  try {
+    const [categories] = await db.query(`
+      SELECT DISTINCT category 
+      FROM products 
+      WHERE category IS NOT NULL AND category != ''
+      ORDER BY category
+    `);
+
+    const categoryList = categories.map((cat) => cat.category);
+
+    res.json({
+      success: true,
+      data: categoryList,
+      total: categoryList.length,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET single product by ID
 router.get("/:id", async (req, res) => {
   try {
